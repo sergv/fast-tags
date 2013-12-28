@@ -37,6 +37,10 @@ import qualified System.Exit
 import qualified System.IO as IO
 import qualified System.IO.Error as IO.Error
 
+import Text.Regex.Base.RegexLike (match)
+import Text.Regex.TDFA (CompOption(..), ExecOption(..))
+import Text.Regex.TDFA.Text
+
 import System.Directory (doesDirectoryExist, getDirectoryContents)
 import System.FilePath ((</>))
 
@@ -359,8 +363,8 @@ tokenize (Pos pos line) = UnstrippedTokens $ map (Pos pos) (tokenizeLine line)
 
 spanToken :: Text -> (Text, Text)
 spanToken text
-    | Just sym <- List.find (`T.isPrefixOf` text) symbols
-    = (sym, T.drop (T.length sym) text)
+    | checkMatch prefixRe text
+    = T.splitAt 2 text -- splitMatch prefixRe text
     | c == '\''
     = let (token, rest) = breakChar   cs in (T.cons c token, rest)
     | c == '"'
@@ -373,11 +377,13 @@ spanToken text
     -- be "9x" not "9" "x".  But I just need a wordlike chunk, not an
     -- actual token.  Otherwise I'd have to tokenize numbers.
     = case T.span identChar text of
-        ("", _)       -> (T.singleton c, cs)
-        (token, rest) -> (token, rest)
+        ("", _)      -> (T.singleton c, cs)
+        state@(_, _) -> state
   where
     Just (c, cs) = T.uncons text
-    symbols = ["--", "{-", "-}", "=>", "->", "::"]
+
+    prefixRe :: Regex
+    prefixRe = compileRe "^(--|\\{-|-\\}|=>|->|::)"
 
 tokenizeLine :: Text -> [TokenVal]
 tokenizeLine text = Newline nspaces : go spaces line
@@ -400,26 +406,62 @@ identChar c = Char.isAlphaNum c || c == '.' || c == '\'' || c == '_' || c == '#'
 
 -- unicode operators are not supported yet
 haskellOpChar :: Char -> Bool
-haskellOpChar c = IntSet.member (Char.ord c) opChars
+haskellOpChar c = checkMatch opRe $ T.singleton c
   where
-    opChars :: IntSet.IntSet
-    opChars = IntSet.fromList $ map Char.ord "-!#$%&*+./<=>?@^|~:\\"
+    opRe :: Regex
+    opRe = compileRe "[-!#$%&*+./<=>?@^|~:\\]"
+
+compileRe :: Text -> Regex
+compileRe re = case compile copts eopts re of
+    Right x -> x
+    Left msg -> error $ "error while compiling prefixRx: " ++ msg
+  where
+    copts = CompOption { caseSensitive  = False
+                       , multiline      = False
+                       , rightAssoc     = True
+                       , newSyntax      = True
+                       , lastStarGreedy = False
+                       }
+    eopts = ExecOption False  where
+
+-- isRight :: Either a b -> Bool
+-- isRight (Right _) = True
+-- isRight _         = False
+
+checkMatch :: Regex -> Text -> Bool
+checkMatch re str = match re str --isRight $ execute re str
+
+splitMatch :: Regex -> Text -> (Text, Text)
+splitMatch re str = let (_, m, rest) = match re str :: (Text, Text, Text)
+                    in (m, rest)
 
 -- | Span a symbol, making sure to not eat comments.
 spanSymbol :: Bool -> Text -> (Text, Text)
 spanSymbol considerColon text
-    | any (`T.isPrefixOf` post) [",", "--", "-}", "{-"] = (pre, post)
-    | Just (c, cs) <- T.uncons post, c == '-' || c == '{' =
+    | {-# SCC spanSymbolComparison #-} (checkMatch prefixRe post) = p
+    | Just (c, cs) <- T.uncons post,
+      c == '-' || c == '{' =
         let (pre2, post2) = spanSymbol considerColon cs
         in (pre <> T.cons c pre2, post2)
-    | otherwise = (pre, post)
-    where
-    (pre, post) = T.break (\c -> T.any (==c) "-{," || not (symbolChar considerColon c)) text
+    | otherwise = p
+  where
+    p@(pre, post) =
+        T.span (\c -> c /= '-' && c /= '{' && c /= ',' && symbolChar considerColon c) text
+
+    prefixRe :: Regex
+    prefixRe = compileRe "^(,|--|-\\}|\\{-)"
 
 symbolChar :: Bool -> Char -> Bool
 symbolChar considerColon c = (Char.isSymbol c || Char.isPunctuation c) &&
-                             (not (c `elem` "(),;[]`{}_:\"'") ||
-                              considerColon && c == ':')
+                             (not (checkMatch punctuationRe $ T.singleton c)
+                              -- (IntSet.member (Char.ord c) punctuations)
+                              || considerColon && c == ':')
+  where
+    punctuationRe :: Regex
+    punctuationRe = compileRe "[][(),;`{}_:\"']"
+
+    -- punctuations :: IntSet.IntSet
+    -- punctuations = IntSet.fromList $ map Char.ord "(),;[]`{}_:\"'"
 
 breakChar :: Text -> (Text, Text)
 breakChar text
