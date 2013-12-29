@@ -359,8 +359,8 @@ tokenize (Pos pos line) = UnstrippedTokens $ map (Pos pos) (tokenizeLine line)
 
 spanToken :: Text -> (Text, Text)
 spanToken text
-    | Just sym <- List.find (`T.isPrefixOf` text) symbols
-    = (sym, T.drop (T.length sym) text)
+    | Set.member prefix symbols
+    = p
     | c == '\''
     = let (token, rest) = breakChar   cs in (T.cons c token, rest)
     | c == '"'
@@ -373,11 +373,15 @@ spanToken text
     -- be "9x" not "9" "x".  But I just need a wordlike chunk, not an
     -- actual token.  Otherwise I'd have to tokenize numbers.
     = case T.span identChar text of
-        ("", _)       -> (T.singleton c, cs)
-        (token, rest) -> (token, rest)
+        ("", _)      -> (T.singleton c, cs)
+        state@(_, _) -> state
   where
     Just (c, cs) = T.uncons text
-    symbols = ["--", "{-", "-}", "=>", "->", "::"]
+
+    p@(prefix, _) = T.splitAt 2 text
+    -- it is critical that all symbols have the same length here
+    symbols :: Set.Set Text
+    symbols = Set.fromList ["--", "{-", "-}", "=>", "->", "::"]
 
 tokenizeLine :: Text -> [TokenVal]
 tokenizeLine text = Newline nspaces : go spaces line
@@ -405,21 +409,58 @@ haskellOpChar c = IntSet.member (Char.ord c) opChars
     opChars :: IntSet.IntSet
     opChars = IntSet.fromList $ map Char.ord "-!#$%&*+./<=>?@^|~:\\"
 
+-- anyText :: (Text -> Bool) -> [Text] -> Bool
+-- anyText _ [] = False
+-- anyText p (x:xs) | p x       = True
+--                  | otherwise = anyText p xs
+-- {-# INLINE anyText #-}
+
 -- | Span a symbol, making sure to not eat comments.
 spanSymbol :: Bool -> Text -> (Text, Text)
 spanSymbol considerColon text
-    | any (`T.isPrefixOf` post) [",", "--", "-}", "{-"] = (pre, post)
-    | Just (c, cs) <- T.uncons post, c == '-' || c == '{' =
+    -- | {-# SCC spanSymbolComparison #-} (anyText (`T.isPrefixOf` post) [",", "--", "-}", "{-"]) = p
+
+    | {-# SCC spanSymbolComparison #-}
+        (not (T.null post) &&
+         (post1 == ',' ||
+          post1 == '-' && (not (T.null postTail) &&
+                           (post2 == '-' || post2 == '}')) ||
+          post1 == '{' && (not (T.null postTail) && post2 == '-'))) = p
+
+    -- slow approach
+    -- | {-# SCC spanSymbolComparison #-} ("," `T.isPrefixOf` post ||
+    --                                     "--" `T.isPrefixOf` post ||
+    --                                     "-}" `T.isPrefixOf` post ||
+    --                                     "{-" `T.isPrefixOf` post) = p
+
+    -- | {-# SCC spanSymbolComparison #-} (not (T.null post) &&
+    --                                     (T.head post == ',' ||
+    --                                      T.take 2 post `Set.member` prefixes)) = p
+
+    | Just (c, cs) <- T.uncons post,
+      c == '-' || c == '{' =
         let (pre2, post2) = spanSymbol considerColon cs
         in (pre <> T.cons c pre2, post2)
-    | otherwise = (pre, post)
-    where
-    (pre, post) = T.break (\c -> T.any (==c) "-{," || not (symbolChar considerColon c)) text
+    | otherwise = p
+  where
+    p@(pre, post) =
+        -- T.break (\c -> T.any (==c) "-{," || not (symbolChar considerColon c)) text
+        T.span (\c -> c /= '-' && c /= '{' && c /= ',' && symbolChar considerColon c) text
+
+    post1 = T.head post
+    postTail = T.tail post
+    post2 = T.head postTail
+
+    -- prefixes :: Set.Set Text
+    -- prefixes = Set.fromList ["--", "-}", "{-"]
 
 symbolChar :: Bool -> Char -> Bool
 symbolChar considerColon c = (Char.isSymbol c || Char.isPunctuation c) &&
-                             (not (c `elem` "(),;[]`{}_:\"'") ||
+                             (not (IntSet.member (Char.ord c) punctuations) ||
                               considerColon && c == ':')
+  where
+    punctuations :: IntSet.IntSet
+    punctuations = IntSet.fromList $ map Char.ord "(),;[]`{}_:\"'"
 
 breakChar :: Text -> (Text, Text)
 breakChar text
