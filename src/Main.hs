@@ -534,30 +534,35 @@ blockTags tokens = case stripNewlines tokens of
     Pos _ (Token _ "module") : Pos pos (Token prefix name) : _ ->
         [mktag pos prefix (snd (T.breakOnEnd "." name)) Module]
     -- newtype X * = X *
-    Pos _ (Token _ "newtype") : Pos pos (Token prefix name) : rest
-        | isTypeName name -> mktag pos prefix name Type : newtypeTags pos rest
-        | otherwise -> let (pos', _, tok, rest') = recordInfixType rest
-                       in tok: newtypeTags pos' rest'
+    Pos _ (Token _ "newtype") : rest ->
+        let tok@(Pos pos (Token _ name)) : rest' = dropDataContext rest
+        in  if isTypeName name
+            then tokToTag tok Type : newtypeTags pos rest
+            else let (pos', _, tok, rest') = recordInfixType rest
+                 in tok: newtypeTags pos' rest'
     -- type family X ...
-    Pos _ (Token _ "type") : Pos _ (Token _ "family") : Pos pos (Token prefix name) : _ ->
-        [mktag pos prefix name Type]
+    Pos _ (Token _ "type") : Pos _ (Token _ "family") : tok : _
+        -> [tokToTag tok Type]
+        -- | isTypeName name -> [mktag pos prefix name Type]
+        -- | otherwise ->
     -- type X * = ...
     Pos _ (Token _ "type") : Pos pos (Token prefix name) : rest
         | isTypeName name -> [mktag pos prefix name Type]
         | otherwise -> let (_, _, tok, _) = recordInfixType rest in [tok]
     -- data family X ...
-    Pos _ (Token _ "data") : Pos _ (Token _ "family") : Pos pos (Token prefix name) : _ ->
-        [mktag pos prefix name Type]
+    Pos _ (Token _ "data"): Pos _ (Token _ "family") : tok : _ ->
+        [tokToTag tok Type]
     -- data X * = X { X :: *, X :: * }
     -- data X * where ...
-    Pos _ (Token _ "data") : Pos pos (Token prefix name) : rest
-        | isTypeName name ->
-            mktag pos prefix name Type : dataTags pos (mapTokens (drop 2) tokens)
-        -- if token after data is not a type name then it isn't
-        -- infix type as well since it may be only '(' or some
-        -- lowercase name, either of which is not type constructor
-        | otherwise -> let (pos', n, tok, _) = recordInfixType rest
-                       in tok: dataTags pos' (mapTokens (drop $! n + 2) tokens)
+    Pos _ (Token _ "data"): rest ->
+        let tok@(Pos pos (Token _ name)) : rest' = dropDataContext rest
+        in  if isTypeName name
+            then tokToTag tok Type : dataTags pos (mapTokens (drop 2) tokens)
+            -- if token after data is not a type name then it isn't
+            -- infix type as well since it may be only '(' or some
+            -- lowercase name, either of which is not type constructor
+            else let (pos', n, tok, _) = recordInfixType rest'
+                 in tok: dataTags pos' (mapTokens (drop $! n + 2) tokens)
     -- class * => X where X :: * ...
     Pos pos (Token _ "class") : _ -> classTags pos (mapTokens (drop 1) tokens)
     -- x, y, z :: *
@@ -566,10 +571,28 @@ blockTags tokens = case stripNewlines tokens of
     isTypeName        x = Char.isUpper c || c == ':' where c = T.head x
     isInfixTypePrefix x = Char.isLower c || c == '(' where c = T.head x
 
-    recordInfixType :: [Token] -> (SrcPos, Int, Tag, [Token])
-    recordInfixType tokens = (pos, n, mktag pos prefix name Type, rest)
+    dropDataContext :: [Token] -> [Token]
+    dropDataContext tokens =
+        if any ((`hasName` "=>") . valOf) $ dataDecl
+        then dropUntil "=>" tokens
+        else tokens
       where
-        (n, Pos pos (Token prefix name) : rest) = dropInfixTypeStart tokens
+        -- Portion of "data" declaration before actual constructors
+        dataDecl = takeWhile ((\v -> not $ v `hasName` "where" || v `hasName` "=") . valOf) tokens
+
+
+    -- recordOperatorTypeFamily :: [Token] -> (Tag, [Token])
+    -- recordOperatorTypeFamily tokens = (tokToTag x Type, xs)
+    --   where
+    --     (x:xs) = dropTillType tokens
+
+    -- similar to dropWhile but drop nested paren blocks too
+    -- dropTillType
+
+    recordInfixType :: [Token] -> (SrcPos, Int, Tag, [Token])
+    recordInfixType tokens = (pos, n, tokToTag tok Type, rest)
+      where
+        (n, tok@(Pos pos _) : rest) = dropInfixTypeStart tokens
 
     -- same as dropWhile with counting
     dropInfixTypeStart :: [Token] -> (Int, [Token])
@@ -705,6 +728,9 @@ whereBlock = breakBlocks . mapTokens (dropUntil "where")
 mktag :: SrcPos -> Text -> Text -> Type -> Tag
 mktag pos prefix name typ = Right $ Pos pos (Tag prefix name typ)
 
+tokToTag :: Token -> Type -> Tag
+tokToTag (Pos pos (Token prefix name)) t = mktag pos prefix name t
+
 warning :: SrcPos -> String -> Tag
 warning pos warn = Left $ show pos ++ ": " ++ warn
 
@@ -732,7 +758,6 @@ hasName _ _ = False
 
 dropUntil :: Text -> [Token] -> [Token]
 dropUntil token = drop 1 . dropWhile (not . (`hasName` token) . valOf)
-
 
 -- * misc
 
