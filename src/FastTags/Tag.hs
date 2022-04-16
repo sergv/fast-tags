@@ -974,7 +974,7 @@ stripOptForall xs                          = xs
 
 stripParensKindsTypeVars :: [Token] -> [Token]
 stripParensKindsTypeVars (Pos _ LParen : xs)  =
-    stripParensKindsTypeVars xs1
+    stripParensKindsTypeVars xs
 stripParensKindsTypeVars (Pos _ DoubleColon : xs) =
     stripParensKindsTypeVars $ drop 1 $
     dropWithStrippingBalanced (\case { RParen -> False; _ -> True }) xs
