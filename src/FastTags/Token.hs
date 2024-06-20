@@ -29,9 +29,8 @@ newtype Offset = Offset { unOffset :: Int }
 increaseLine :: Line -> Line
 increaseLine (Line n) = Line $! n + 1
 
-data SrcPos = SrcPos {
-    posFile     :: !FilePath
-    , posLine   :: {-# UNPACK #-} !Line
+data SrcPos = SrcPos
+    { posLine   :: {-# UNPACK #-} !Line
     , posOffset :: {-# UNPACK #-} !Offset
     -- | No need to keep prefix strict since most of the prefixes will not be
     -- used.
@@ -40,11 +39,11 @@ data SrcPos = SrcPos {
     } deriving (Eq, Ord)
 
 instance NFData SrcPos where
-    rnf (SrcPos v w x y z) = rnf v `seq` rnf w `seq` rnf x `seq` rnf y `seq` rnf z
+    rnf (SrcPos w x y z) = w `seq` rnf x `seq` rnf y `seq` rnf z
 
 instance Show SrcPos where
-    show (SrcPos fn line offset prefix suffix) =
-        fn ++ ":" ++ show (unLine line) ++ ":" ++ show (unOffset offset) ++ prefix' ++ suffix'
+    show (SrcPos line offset prefix suffix) =
+        show (unLine line) ++ ":" ++ show (unOffset offset) ++ prefix' ++ suffix'
         where
         prefix' = clean prefix
         suffix' = clean suffix

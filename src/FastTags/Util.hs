@@ -5,11 +5,12 @@ import qualified Data.Char as Char
 import qualified Data.Function as Function
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Encoding
 import qualified Data.Text.Encoding.Error as Encoding.Error
+
+import qualified Data.Containers.ListUtils as L
 
 -- | Read a UTF8 file, but don't crash on encoding errors.
 readFileLenient :: FilePath -> IO Text
@@ -72,4 +73,4 @@ isSymbolCharacterCategory cat = case cat of
     _                         -> False
 
 unique :: Ord a => [a] -> [a]
-unique = Set.toList . Set.fromList
+unique = L.nubOrd
