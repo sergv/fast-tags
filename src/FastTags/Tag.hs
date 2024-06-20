@@ -7,11 +7,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE NamedFieldPuns #-}
+
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module FastTags.Tag (
     -- * types
     TagVal(..)
+    , ParentTag(..)
     , Type(..)
     , Tag(..)
     , Pos(..)
@@ -19,8 +23,6 @@ module FastTags.Tag (
     , UnstrippedTokens(..)
     -- * process
     , processFile
-    , qualify
-    , findSrcPrefix
     , process
     , tokenizeInput
     , processTokens
@@ -44,18 +46,13 @@ import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.Char as Char
-import Data.Functor ((<$>))
-import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (maybeToList, isJust, fromMaybe)
-import Data.Monoid ((<>), Monoid(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Data.Void (Void)
-
-import qualified System.FilePath as FilePath
 
 import FastTags.LexerTypes (LitMode(..))
 import qualified FastTags.Lexer as Lexer
@@ -63,18 +60,26 @@ import qualified FastTags.Token as Token
 import FastTags.Token (Token, Pos(..), SrcPos(..), TokenVal(..))
 import qualified FastTags.Util as Util
 
+import System.OsPath
+import System.File.OsPath
+
 -- * types
+
+data ParentTag = ParentTag
+    { ptName :: !Text
+    , ptType :: !Type
+    } deriving (Show, Eq, Ord)
+
+instance NFData ParentTag where
+    rnf (ParentTag x y) = rnf x `seq` rnf y
 
 data TagVal = TagVal {
     tvName     :: !Text
     , tvType   :: !Type
-    , tvParent :: !(Maybe Text)
+    , tvParent :: !(Maybe ParentTag)
       -- ^ parent of this tag; parent can only be of type
       -- Class, Data or Family
     } deriving (Show, Eq, Ord)
-
-tagName :: Pos TagVal -> Text
-tagName = tvName . valOf
 
 tagLine :: Pos TagVal -> Token.Line
 tagLine = posLine . posOf
@@ -128,10 +133,13 @@ partitionTags = go [] [] []
         RepeatableTag a -> go tags (a:repeats) warns ts
         Warning a       -> go tags repeats (a:warns) ts
 
-extractName :: Tag -> Maybe Text
-extractName (Tag t)           = Just $ tagName t
-extractName (RepeatableTag t) = Just $ tagName t
-extractName (Warning _)       = Nothing
+extractParent :: Tag -> Maybe ParentTag
+extractParent (Tag (Pos _ TagVal{tvName, tvType}))           =
+    Just $ ParentTag tvName tvType
+extractParent (RepeatableTag (Pos _ TagVal{tvName, tvType})) =
+    Just $ ParentTag tvName tvType
+extractParent (Warning _)                                    =
+    Nothing
 
 -- | Newlines have to remain in the tokens because 'breakBlocks' relies on
 -- them.  But they make pattern matching on the tokens unreliable because
@@ -171,55 +179,22 @@ data ProcessMode
 -- * processFile
 
 -- | Read tags from one file.
-processFile :: FilePath -> Bool -> IO ([Pos TagVal], [String])
-processFile fn trackPrefixes = process fn trackPrefixes <$> BS.readFile fn
-
--- * qualify
-
--- | Each tag is split into a one qualified with its module name and one
--- without.
---
--- TODO I could mark it static, to put in a file: mark, which would make vim
--- prioritize it for same-file tags, but I think it already does that, so maybe
--- this isn't necessary?
-qualify :: Bool -> Maybe Text -> Pos TagVal -> Pos TagVal
-qualify fullyQualify srcPrefix (Token.Pos pos (TagVal name typ _)) =
-    Token.Pos pos TagVal
-        { tvName   = qualified
-        , tvType   = typ
-        , tvParent = Nothing
-        }
-    where
-    qualified = case typ of
-        Module -> module_
-        _ -> module_ <> "." <> name
-    module_
-        | fullyQualify = T.replace "/" "." $ T.dropWhile (=='/') $
-            maybe id dropPrefix srcPrefix $ T.pack file
-        | otherwise = T.pack $ FilePath.takeFileName file
-    file = FilePath.dropExtension $ Token.posFile pos
-
-dropPrefix :: Text -> Text -> Text
-dropPrefix prefix txt = maybe txt id $ T.stripPrefix prefix txt
-
-findSrcPrefix :: [Text] -> Pos a -> Maybe Text
-findSrcPrefix prefixes (Token.Pos pos _) =
-    List.find (`T.isPrefixOf` file) prefixes
-    where file = T.pack $ FilePath.dropExtension $ Token.posFile pos
+processFile :: OsPath -> Bool -> IO ([Pos TagVal], [String])
+processFile fn trackPrefixes = process fn trackPrefixes <$> readFile' fn
 
 -- | Process one file's worth of tags.
-process :: FilePath -> Bool -> ByteString -> ([Pos TagVal], [String])
+process :: OsPath -> Bool -> ByteString -> ([Pos TagVal], [String])
 process fn trackPrefixes input =
-    case tokenizeInput fn trackPrefixes litMode input of
+    case tokenizeInput trackPrefixes litMode input of
         Left msg   -> ([], [T.unpack msg])
         Right toks -> processTokens procMode toks
     where
     (procMode, litMode) = fromMaybe defaultModes $ determineModes fn
 
-tokenizeInput :: FilePath -> Bool -> LitMode Void -> BS.ByteString
+tokenizeInput :: Bool -> LitMode Void -> BS.ByteString
     -> Either Text [Token]
-tokenizeInput fn trackPrefixes mode =
-    Lexer.tokenize fn mode trackPrefixes
+tokenizeInput trackPrefixes mode =
+    Lexer.tokenize mode trackPrefixes
 
 processTokens :: ProcessMode -> [Token] -> ([Pos TagVal], [String])
 processTokens mode =
@@ -1114,8 +1089,8 @@ addParent parent = onTagVal f
     where
     f (Pos pos (TagVal name typ _)) =
         Pos pos (TagVal name typ parentName)
-    parentName :: Maybe Text
-    parentName = join $ extractName <$> parent
+    parentName :: Maybe ParentTag
+    parentName = join $ extractParent <$> parent
 
 mkTag :: SrcPos -> Text -> Type -> Tag
 mkTag pos name typ = Tag $ Pos pos (TagVal name typ Nothing)
@@ -1159,19 +1134,19 @@ spanUntil token
     . unstrippedTokensOf
 
 -- | Crude predicate for Haskell files
-isHsFile :: FilePath -> Bool
+isHsFile :: OsPath -> Bool
 isHsFile = isJust . determineModes
 
 defaultModes :: (ProcessMode, LitMode Void)
 defaultModes = (ProcessVanilla, LitVanilla)
 
-determineModes :: FilePath -> Maybe (ProcessMode, LitMode Void)
-determineModes x = case FilePath.takeExtension x of
-    ".hs"  -> Just defaultModes
-    ".hsc" -> Just defaultModes
-    ".lhs" -> Just (ProcessVanilla, LitOutside)
-    ".x"   -> Just (ProcessAlexHappy, LitVanilla)
-    ".y"   -> Just (ProcessAlexHappy, LitVanilla)
-    ".lx"  -> Just (ProcessAlexHappy, LitOutside)
-    ".ly"  -> Just (ProcessAlexHappy, LitOutside)
-    _      -> Nothing
+determineModes :: OsPath -> Maybe (ProcessMode, LitMode Void)
+determineModes x = case takeExtension x of
+    [osp|.hs|]  -> Just defaultModes
+    [osp|.hsc|] -> Just defaultModes
+    [osp|.lhs|] -> Just (ProcessVanilla, LitOutside)
+    [osp|.x|]   -> Just (ProcessAlexHappy, LitVanilla)
+    [osp|.y|]   -> Just (ProcessAlexHappy, LitVanilla)
+    [osp|.lx|]  -> Just (ProcessAlexHappy, LitOutside)
+    [osp|.ly|]  -> Just (ProcessAlexHappy, LitOutside)
+    _           -> Nothing

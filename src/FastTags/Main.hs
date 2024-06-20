@@ -44,6 +44,10 @@ import qualified FastTags.Token as Token
 import qualified FastTags.Util as Util
 import qualified FastTags.Vim as Vim
 
+import qualified FastTags.CompactFormat as CompactFormat
+
+import System.OsPath
+
 import qualified Paths_fast_tags
 
 
@@ -58,6 +62,8 @@ options =
         , " (TODO: fix that)"
         , " This only works for >=Cabal-2.2.0."
         ]
+    , GetOpt.Option [] ["compact-format"] (GetOpt.NoArg CompactFormat)
+        "generate tags in compact Emacs format"
     , GetOpt.Option ['e'] ["emacs"] (GetOpt.NoArg ETags)
         "generate tags in Emacs format"
     , GetOpt.Option [] ["exclude"] (GetOpt.ReqArg Exclude "pattern") $ concat
@@ -120,6 +126,7 @@ type Pattern = String
 
 data Flag =
     Cabal
+    | CompactFormat
     | ETags
     | Exclude !Pattern
     | FollowSymlinks
@@ -151,6 +158,7 @@ main = do
 
     let verbose       = Verbose `elem` flags
         emacs         = ETags `elem` flags
+        compactFormat = CompactFormat `elem` flags
         vim           = not emacs
         trackPrefixes = emacs
         output        = last $ defaultOutput : [fn | Output fn <- flags]
@@ -219,7 +227,9 @@ main = do
             else IO.withFile output IO.WriteMode action
     withOutput $ \hdl -> do
       IO.hSetEncoding hdl IO.utf8
-      mapM_ (write hdl) allTags
+      if compactFormat
+      then CompactFormat.writeTo hdl newTags
+      else mapM_ (write hdl) allTags
 
     where
     usage msg = do
@@ -238,7 +248,7 @@ typeOf tagVal = case Token.valOf tagVal of
     Tag.TagVal _ typ _ -> typ
 
 -- | Expand file inputs from cmdline.
-getInputs :: [Flag] -> [FilePath] -> IO [FilePath]
+getInputs :: [Flag] -> [OsPath] -> IO [OsPath]
 getInputs flags inputs
     | inputs == ["-"] = Util.split sep <$> getContents
     | Recurse `elem` flags = fmap concat $ forM inputs $ \input -> do

@@ -279,14 +279,13 @@ type AlexM = WriterT [(AlexInput, TokenVal)] (State AlexState)
 
 {-# INLINE runAlexM #-}
 runAlexM
-  :: FilePath
-  -> Bool
+  :: Bool
   -> LitMode Void
   -> AlexCode
   -> C8.ByteString
   -> AlexM a
   -> (a, [Token])
-runAlexM filepath trackPrefixesAndOffsets litLoc startCode input action =
+runAlexM trackPrefixesAndOffsets litLoc startCode input action =
     performIO $
     withAlexInput input $ \input' inputSize -> do
         let (a, xs) = evalState (runWriterT action)
@@ -297,7 +296,7 @@ runAlexM filepath trackPrefixesAndOffsets litLoc startCode input action =
                 !size = inputSize - 1
                 !idx  = positionsIndex ptr size
                 res   =
-                    map (\(x, y) -> Pos (mkSrcPos filepath idx ptr x) y) xs
+                    map (\(x, y) -> Pos (mkSrcPos idx ptr x) y) xs
             pure $! res `deepseq` (a, res)
         else do
             -- Contents of 'xs' has been seq'ed so TokenVals in there should
@@ -308,21 +307,19 @@ runAlexM filepath trackPrefixesAndOffsets litLoc startCode input action =
             -- forced outside of 'withForeignPtr' bounds. The call to 'evaluate' below
             -- is intended to prevent such transformation from occuring.
             _ <- evaluate xs
-            pure (a, map (\(x, y) -> Pos (mkSrcPosNoPrefix filepath x) y) xs)
+            pure (a, map (\(x, y) -> Pos (mkSrcPosNoPrefix x) y) xs)
 
-mkSrcPosNoPrefix :: FilePath -> AlexInput -> SrcPos
-mkSrcPosNoPrefix filename input =
-    SrcPos { posFile   = filename
-           , posLine   = view aiLineL input
+mkSrcPosNoPrefix :: AlexInput -> SrcPos
+mkSrcPosNoPrefix input =
+    SrcPos { posLine   = view aiLineL input
            , posOffset = Offset 0
            , posPrefix = mempty
            , posSuffix = mempty
            }
 
-mkSrcPos :: FilePath -> U.Vector Int -> Ptr Word8 -> AlexInput -> SrcPos
-mkSrcPos filename bytesToCharsMap start (input@AlexInput {aiPtr}) =
-    SrcPos { posFile = filename
-           , posLine = view aiLineL input
+mkSrcPos :: U.Vector Int -> Ptr Word8 -> AlexInput -> SrcPos
+mkSrcPos bytesToCharsMap start (input@AlexInput {aiPtr}) =
+    SrcPos { posLine = view aiLineL input
            , posOffset
            , posPrefix
            , posSuffix
