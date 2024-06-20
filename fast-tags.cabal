@@ -73,14 +73,16 @@ library
         bytestring,
         containers,
         deepseq,
-        filepath,
+        file-io,
+        filepath >= 1.5,
         mtl >=2.1,
         -- text 0.11.1.12 has a bug.
         text (> 0.11.1.12 || < 0.11.1.12),
         transformers,
+        os-string,
         vector,
         void
-    build-tools: alex
+    build-tool-depends: alex:alex
     exposed-modules:
         FastTags.Cabal
         FastTags.Emacs
@@ -92,6 +94,7 @@ library
         FastTags.Token
         FastTags.Util
         FastTags.Vim
+        System.OsPath.Ext
     hs-source-dirs: src
     ghc-options: -Wall -fno-warn-name-shadowing -O2
     if flag(profile)
@@ -102,7 +105,7 @@ executable fast-tags
     main-is: src/FastTags/Main.hs
     other-modules: Paths_fast_tags
     build-depends:
-        base >= 3 && < 5, filepath, directory >=1.3.0.0,
+        base >= 3 && < 5, filepath >= 1.5, directory >=1.3.0.0,
         -- text 0.11.1.12 has a bug.
         text (> 0.11.1.12 || < 0.11.1.12),
         async >= 2.0.0.0,
@@ -137,6 +140,7 @@ test-suite test-fast-tags
     build-depends:
         base >= 3 && < 5,
         bytestring,
+        filepath >= 1.5,
         tasty,
         tasty-hunit,
         -- text 0.11.1.12 has a bug.

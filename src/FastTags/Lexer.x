@@ -342,16 +342,15 @@ shouldEndLiterateLatex litLoc _inputBefore _len _inputAfter =
     isLiterateLatexInside litLoc
 
 tokenize
-  :: FilePath -> LitMode Void -> Bool -> BS.ByteString -> Either Text [Token]
-tokenize filename litLoc trackPrefixesOffsets input =
-    case runAlexM filename trackPrefixesOffsets litLoc code input scanTokens of
+  :: LitMode Void -> Bool -> BS.ByteString -> Either Text [Token]
+tokenize litLoc trackPrefixesOffsets input =
+    case runAlexM trackPrefixesOffsets litLoc code input scanTokens of
         (Nothing, xs) -> Right xs
         (Just err, _) -> Left err
     where
     code = case litLoc of
-        LitVanilla  -> startCode
-        LitOutside  -> literateCode
-        LitInside x -> absurd x
+        LitVanilla -> startCode
+        LitOutside -> literateCode
 
 scanTokens :: AlexM (Maybe Text)
 scanTokens = go

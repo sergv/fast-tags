@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Functions specific to emacs tags.
 module FastTags.Emacs (format, formatTag) where
-import Data.Monoid ((<>))
+
+import Data.Bifunctor
 import qualified Data.Text as Text
 import Data.Text (Text)
 
@@ -10,11 +11,16 @@ import qualified FastTags.Token as Token
 import qualified FastTags.Util as Util
 import qualified FastTags.Vim as Vim
 
+import System.OsPath
+import System.OsPath.Ext
 
-format :: Int -> [Token.Pos Tag.TagVal] -> [Text]
-format maxSeparation = map (uncurry formatFileTags)
+format :: Int -> [(OsPath, [Token.Pos Tag.TagVal])] -> [Text]
+format maxSeparation xss
+    = map (uncurry formatFileTags)
     . map (fmap (dropAdjacent maxSeparation))
-    . Util.groupOnKey (Token.posFile . Token.posOf)
+    . map (second (concatMap snd))
+    . Util.groupOnKey fst
+    $ xss
 
 -- | Like 'Vim.dropAdjacent', but since emacs isn't incremental it deals with
 -- TagVals, not tag file lines.  Also the tags are already grouped by file.
@@ -26,9 +32,9 @@ dropAdjacent maxSeparation = concatMap dropInName. Util.groupOn nameOf
     dropInName tag@[_] = tag
     dropInName tags = Vim.dropAdjacentInFile lineOf maxSeparation tags
 
-formatFileTags :: FilePath -> [Token.Pos Tag.TagVal] -> Text
+formatFileTags :: OsPath -> [Token.Pos Tag.TagVal] -> Text
 formatFileTags file tags = Text.concat
-    [ "\x0c\n", Text.pack file, ","
+    [ "\x0c\n", pathToText file, ","
     , showt (Text.length tagsText), "\n", tagsText
     ]
     where tagsText = Text.unlines $ map formatTag tags

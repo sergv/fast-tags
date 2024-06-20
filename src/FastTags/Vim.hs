@@ -20,15 +20,17 @@ import qualified FastTags.Tag as Tag
 import qualified FastTags.Token as Token
 import qualified FastTags.Util as Util
 
+import System.OsPath
+import System.OsPath.Ext
 
 -- | Format new tags, drop old tags from the loaded files, merge old and
 -- new, and sort.
-merge :: Int -> [FilePath] -> [[Token.Pos Tag.TagVal]] -> [Text] -> [Text]
+merge :: Int -> [FilePath] -> [(OsPath, [Token.Pos Tag.TagVal])] -> [Text] -> [Text]
 merge maxSeparation fns new old = (vimMagicLine:) $
     map snd $ dropAdjacent maxSeparation $ Util.sortOn fst $ newTags ++ oldTags
     -- The existing vimMagicLine will fail parseTag and be dropped.
     where
-    newTags = keyOnJust parseTag $ map showTag (concat new)
+    newTags = keyOnJust parseTag $ concatMap (\(fn, xs) -> map (showTag fn) xs) new
     oldTags = filter ((`Set.notMember` fnSet) . filename . fst) $
         keyOnJust parseTag old
     fnSet = Set.fromList $ map Text.pack fns
@@ -91,10 +93,10 @@ vimMagicLine :: Text
 vimMagicLine = "!_TAG_FILE_SORTED\t1\t//"
 
 -- | Convert a Tag to text, e.g.: AbsoluteMark\tCmd/TimeStep.hs 67 ;" f
-showTag :: Token.Pos Tag.TagVal -> Text
-showTag (Token.Pos pos (Tag.TagVal text typ _)) = mconcat
+showTag :: OsPath -> Token.Pos Tag.TagVal -> Text
+showTag fn (Token.Pos pos (Tag.TagVal text typ _)) = mconcat
     [ text, "\t"
-    , Text.pack (Token.posFile pos), "\t"
+    , pathToText fn, "\t"
     , Text.pack (show $ Token.unLine (Token.posLine pos)), ";\"\t"
     , Text.singleton (toType typ)
     ]
