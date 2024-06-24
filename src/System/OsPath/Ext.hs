@@ -12,8 +12,10 @@ module System.OsPath.Ext
   , textFromShortByteString
   , stripProperPrefix
   , pathToText
+  , pathFromUtf8BS
   ) where
 
+import Data.ByteString (ByteString)
 import Data.ByteString.Short (ShortByteString)
 import Data.ByteString.Short qualified as BSS
 import Data.Coerce
@@ -35,8 +37,22 @@ pathToUtf8 =
 pathToText :: OsPath -> Text
 pathToText = textFromShortByteString . pathToUtf8
 
+pathFromUtf8BS :: ByteString -> OsPath
+pathFromUtf8BS = pathFromUtf8 . BSS.toShort
+
+pathFromUtf8 :: ShortByteString -> OsPath
+pathFromUtf8 =
+#ifdef mingw32_HOST_OS
+  OsString . WindowsString . _reconvertUtf8ToUtf16LE
+#else
+  OsString . PosixString
+#endif
+
 _reconvertUtf16LEToUtf8 :: ShortByteString -> ShortByteString
 _reconvertUtf16LEToUtf8 = textToShortByteString . TE.decodeUtf16LE . BSS.fromShort
+
+_reconvertUtf8ToUtf16LE :: ShortByteString -> ShortByteString
+_reconvertUtf8ToUtf16LE = BSS.toShort . TE.encodeUtf16LE . textFromShortByteString
 
 textToShortByteString :: Text -> ShortByteString
 textToShortByteString (T.Text (TA.ByteArray arr) _offset _len) = BSS.SBS arr
