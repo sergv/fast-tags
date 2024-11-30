@@ -210,7 +210,7 @@ typeOf tagVal = case Token.valOf tagVal of
 -- | Expand file inputs from cmdline.
 getInputs :: [Flag] -> [OsPath] -> IO [OsPath]
 getInputs flags inputs
-    | inputs == [[osp|-|]] = map pathFromUtf8BS . C8.split sep <$> BS.getContents
+    | inputs == [[osp|-|]] = map pathFromUtf8BS . filter (not . C8.null) . C8.split sep <$> BS.getContents
     | otherwise            = pure inputs
     where
     sep = if ZeroSep `elem` flags then '\0' else '\n'
