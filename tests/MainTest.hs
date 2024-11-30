@@ -836,6 +836,7 @@ testProcess = testGroup "process"
     , testHSC2HS
     , testAlex
     , testHappy
+    , testUnicode
     ]
 
 testMeta :: TestTree
@@ -1615,6 +1616,7 @@ testFunctions = testGroup "functions"
       ["Example"]
 
     , toplevelFunctionsWithoutSignatures
+
     ]
     where
     (==>) = testTagNames filename
@@ -2608,6 +2610,17 @@ testHappy = testGroup "happy"
     (==>) = testTagNames [osp|Test.y|]
     (|=>) = testTagNames [osp|Test.ly|]
 
+testUnicode :: TestTree
+testUnicode = testGroup "Unicode"
+    [ "foo = ()" ==> ["foo"]
+    , "привет = ()" ==> ["привет"]
+    , "猫 = ()" ==> ["猫"]
+    , "foo x = x * x" ==> ["foo"]
+    , "привет x = x * x" ==> ["привет"]
+    , "自乗 x = x * x" ==> ["自乗"]
+    ]
+    where
+    (==>) = testTagNames filename
 
 test :: (Show a, ExtendedEq b, Show b) => (a -> b) -> a -> b -> TestTree
 test f x expected =
