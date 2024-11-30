@@ -25,7 +25,7 @@ import System.OsPath.Ext
 
 -- | Format new tags, drop old tags from the loaded files, merge old and
 -- new, and sort.
-merge :: Int -> [FilePath] -> [(OsPath, [Token.Pos Tag.TagVal])] -> [Text] -> [Text]
+merge :: Int -> [OsPath] -> [(OsPath, [Token.Pos Tag.TagVal])] -> [Text] -> [Text]
 merge maxSeparation fns new old = (vimMagicLine:) $
     map snd $ dropAdjacent maxSeparation $ Util.sortOn fst $ newTags ++ oldTags
     -- The existing vimMagicLine will fail parseTag and be dropped.
@@ -33,7 +33,7 @@ merge maxSeparation fns new old = (vimMagicLine:) $
     newTags = keyOnJust parseTag $ concatMap (\(fn, xs) -> map (showTag fn) xs) new
     oldTags = filter ((`Set.notMember` fnSet) . filename . fst) $
         keyOnJust parseTag old
-    fnSet = Set.fromList $ map Text.pack fns
+    fnSet = Set.fromList $ map pathToText fns
 
 keyOnJust :: (a -> Maybe k) -> [a] -> [(k, a)]
 keyOnJust f xs = [(k, x) | (Just k, x) <- Util.keyOn f xs]

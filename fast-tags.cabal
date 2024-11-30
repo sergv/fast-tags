@@ -67,24 +67,24 @@ flag profile
 
 library
     build-depends:
-        Cabal,
         array,
-        base >= 3 && < 5,
+        base >= 4.10 && < 5,
         bytestring,
         containers,
         deepseq,
         file-io,
         filepath >= 1.5,
+        ghc-prim,
         mtl >=2.1,
-        -- text 0.11.1.12 has a bug.
-        text (> 0.11.1.12 || < 0.11.1.12),
+        -- We need utf8-encoded Text
+        text >= 2.0,
         transformers,
         os-string,
         vector,
         void
     build-tool-depends: alex:alex
     exposed-modules:
-        FastTags.Cabal
+        FastTags.CompactFormat
         FastTags.Emacs
         FastTags.LensBlaze
         FastTags.Lexer
@@ -105,7 +105,10 @@ executable fast-tags
     main-is: src/FastTags/Main.hs
     other-modules: Paths_fast_tags
     build-depends:
-        base >= 3 && < 5, filepath >= 1.5, directory >=1.3.0.0,
+        base >= 3 && < 5,
+        bytestring,
+        filepath >= 1.5,
+        directory >=1.3.0.0,
         -- text 0.11.1.12 has a bug.
         text (> 0.11.1.12 || < 0.11.1.12),
         async >= 2.0.0.0,
