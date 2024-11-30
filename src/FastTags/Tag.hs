@@ -834,9 +834,12 @@ functionName expect = isFunction
         Just (c, cs) ->
             firstChar c && startIdentChar c && T.all (identChar True) cs
         Nothing      -> False
-    firstChar = case expect of
-        ExpectFunctions    -> \c -> Char.isLower c || c == '_'
-        ExpectConstructors -> Char.isUpper
+    firstChar c = case expect of
+        ExpectFunctions    -> c == '_' || case Char.generalCategory c of
+            Char.LowercaseLetter -> True
+            Char.OtherLetter     -> True
+            _                    -> False
+        ExpectConstructors -> Char.isUpper c
 
 -- | * = X *
 newtypeTags :: SrcPos -> UnstrippedTokens -> [Tag]
