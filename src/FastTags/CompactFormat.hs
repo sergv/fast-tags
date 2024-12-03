@@ -15,6 +15,7 @@ module FastTags.CompactFormat
     ( writeTo
     ) where
 
+import Control.Exception
 import Control.Monad.IO.Class (MonadIO(..))
 import Data.ByteString.Char8 (ByteString)
 import Data.ByteString.Char8 qualified as C8
@@ -31,6 +32,7 @@ import Foreign.ForeignPtr (touchForeignPtr)
 import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Storable
 import GHC.Magic (inline)
+import System.Exit
 import System.IO (Handle, hPutChar)
 
 import FastTags.Tag qualified as Tag
@@ -39,25 +41,27 @@ import FastTags.Token qualified as Token
 import System.OsPath
 import System.OsPath.Ext
 
-writeTo :: Handle -> [(OsPath, [Token.Pos Tag.TagVal])] -> IO ()
+writeTo :: Handle -> [(OsPath, [Token.Pos Tag.TagVal], ByteString, Maybe SomeException)] -> IO ()
 writeTo dest xs = do
     list $
-        for_ xs $ \(fn, tags) -> list $ do
-            txt $ pathToText fn
-            for_ tags $ \Token.Pos{Token.posOf = Token.SrcPos{Token.posLine}, Token.valOf = Tag.TagVal{Tag.tvName, Tag.tvType, Tag.tvParent}} ->
-                list $ do
-                    int $ Token.unLine posLine
-                    txt tvName
-                    case tvParent of
-                        Nothing                                    -> do
-                            rawchar '.'
-                            lispChar $ toType tvType
-                            pure ()
-                        Just Tag.ParentTag{Tag.ptName, Tag.ptType} -> do
-                            lispChar $ toType tvType
-                            txt ptName
-                            rawchar '.'
-                            lispChar $ toType ptType
+        for_ xs $ \(fn, tags, input, e) -> case tags of
+            [] -> die $ "DEBUG ERROR: input " ++ show fn ++ " produced no tags. Exception: " ++ show e ++ ". Analyzed file contents:\n" ++ show input
+            _ -> list $ do
+                txt $ pathToText fn
+                for_ tags $ \Token.Pos{Token.posOf = Token.SrcPos{Token.posLine}, Token.valOf = Tag.TagVal{Tag.tvName, Tag.tvType, Tag.tvParent}} ->
+                    list $ do
+                        int $ Token.unLine posLine
+                        txt tvName
+                        case tvParent of
+                            Nothing                                    -> do
+                                rawchar '.'
+                                lispChar $ toType tvType
+                                pure ()
+                            Just Tag.ParentTag{Tag.ptName, Tag.ptType} -> do
+                                lispChar $ toType tvType
+                                txt ptName
+                                rawchar '.'
+                                lispChar $ toType ptType
     where
         list :: IO a -> IO a
         list action = rawchar '(' *> action <* rawchar ')'

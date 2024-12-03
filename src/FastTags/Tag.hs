@@ -179,8 +179,8 @@ data ProcessMode
 -- * processFile
 
 -- | Read tags from one file.
-processFile :: OsPath -> Bool -> IO ([Pos TagVal], [String])
-processFile fn trackPrefixes = process fn trackPrefixes <$> readFile' fn
+processFile :: OsPath -> Bool -> IO ([Pos TagVal], [String], ByteString)
+processFile fn trackPrefixes = (\x -> let (a, b) = process fn trackPrefixes x in (a, b, x)) <$> readFile' fn
 
 -- | Process one file's worth of tags.
 process :: OsPath -> Bool -> ByteString -> ([Pos TagVal], [String])

@@ -160,27 +160,28 @@ main = do
         Exit.exitSuccess
 
     stderr <- MVar.newMVar IO.stderr
-    (newTags :: [(OsPath, [Token.Pos Tag.TagVal])]) <-
+    (newTags :: [(OsPath, [Token.Pos Tag.TagVal], C8.ByteString, Maybe Exception.SomeException)]) <-
         flip Async.mapConcurrently (zip [0 :: Int ..] inputs) $
-            \(i, fn) -> Exception.handle (catchError stderr fn) $ do
-                (newTags, warnings) <- Tag.processFile fn trackPrefixes
-                newTags <- return $ if NoModuleTags `elem` flags
-                    then filter ((/=Tag.Module) . typeOf) newTags else newTags
-                -- Try to do work before taking the lock.
-                Exception.evaluate $ DeepSeq.rnf warnings
-                MVar.withMVar stderr $ \hdl ->
-                    mapM_ (IO.hPutStrLn hdl) warnings
-                when verbose $ do
-                    let line = take 78 $ show i ++ ": " ++ show fn
-                    putStr $ '\r' : line ++ replicate (78 - length line) ' '
-                    IO.hFlush IO.stdout
-                return (fn, newTags)
+            \(i, fn) -> do
+                (tags, warnings, input) <- Tag.processFile fn trackPrefixes
+                Exception.handle (catchError stderr fn input) $ do
+                    tags <- return $ if NoModuleTags `elem` flags
+                        then filter ((/=Tag.Module) . typeOf) tags else tags
+                    -- Try to do work before taking the lock.
+                    Exception.evaluate $ DeepSeq.rnf warnings
+                    MVar.withMVar stderr $ \hdl ->
+                        mapM_ (IO.hPutStrLn hdl) warnings
+                    when verbose $ do
+                        let line = take 78 $ show i ++ ": " ++ show fn
+                        putStr $ '\r' : line ++ replicate (78 - length line) ' '
+                        IO.hFlush IO.stdout
+                    return (fn, tags, input, Nothing)
 
     when verbose $ putChar '\n'
 
     let allTags = if vim
-            then Vim.merge maxSeparation inputs newTags oldTags
-            else Emacs.format maxSeparation newTags
+            then Vim.merge maxSeparation inputs (map (\(a, b, _, _) -> (a, b)) newTags) oldTags
+            else Emacs.format maxSeparation (map (\(a, b, _, _) -> (a, b)) newTags)
     let write = if vim then Text.IO.hPutStrLn else Text.IO.hPutStr
     let withOutput action = if output == "-"
             then action IO.stdout
@@ -196,12 +197,11 @@ main = do
         putStr $ GetOpt.usageInfo (msg ++ "\n" ++ help) options
         Exit.exitFailure
 
-catchError :: MVar.MVar IO.Handle -> OsPath -> Exception.SomeException
-    -> IO (OsPath, [a])
-catchError stderr fn e = do
+catchError :: MVar.MVar IO.Handle -> OsPath -> b -> Exception.SomeException -> IO (OsPath, [a], b, Maybe Exception.SomeException)
+catchError stderr fn b e = do
     MVar.withMVar stderr $ \hdl -> IO.hPutStrLn hdl $
         "Error while analyzing " ++ show fn ++ ":\n" ++ show e
-    return (fn, [])
+    return (fn, [], b, Just e)
 
 typeOf :: Token.Pos Tag.TagVal -> Tag.Type
 typeOf tagVal = case Token.valOf tagVal of
