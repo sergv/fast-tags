@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE NamedFieldPuns      #-}
@@ -24,6 +25,15 @@ import qualified Control.Concurrent.MVar as MVar
 import qualified Control.DeepSeq as DeepSeq
 import qualified Control.Exception as Exception
 import Control.Monad
+
+import Control.Concurrent (myThreadId, ThreadId, getNumCapabilities)
+import Control.Concurrent.STM (atomically)
+import Control.Concurrent.STM.TChan
+import Control.Concurrent.STM.TMChan
+import Control.Concurrent.STM.TVar
+import Control.Exception (bracket, finally, SomeException)
+import Data.Foldable
+import Data.Traversable
 
 import qualified Data.List as List
 import qualified Data.Text as Text
@@ -160,21 +170,25 @@ main = do
         Exit.exitSuccess
 
     stderr <- MVar.newMVar IO.stderr
+    jobs   <- getNumCapabilities
     (newTags :: [(OsPath, [Token.Pos Tag.TagVal])]) <-
-        flip Async.mapConcurrently (zip [0 :: Int ..] inputs) $
-            \(i, fn) -> Exception.handle (catchError stderr fn) $ do
-                (newTags, warnings) <- Tag.processFile fn trackPrefixes
-                newTags <- return $ if NoModuleTags `elem` flags
-                    then filter ((/=Tag.Module) . typeOf) newTags else newTags
-                -- Try to do work before taking the lock.
-                Exception.evaluate $ DeepSeq.rnf warnings
-                MVar.withMVar stderr $ \hdl ->
-                    mapM_ (IO.hPutStrLn hdl) warnings
-                when verbose $ do
-                    let line = take 78 $ show i ++ ": " ++ show fn
-                    putStr $ '\r' : line ++ replicate (78 - length line) ' '
-                    IO.hFlush IO.stdout
-                return (fn, newTags)
+        parMapNondet
+            [1..jobs]
+            (zip [0 :: Int ..] inputs)
+            $ \_ (i, fn) -> do
+                Exception.handle (catchError stderr fn) $ do
+                    (newTags, warnings) <- Tag.processFile fn trackPrefixes
+                    newTags <- return $ if NoModuleTags `elem` flags
+                        then filter ((/=Tag.Module) . typeOf) newTags else newTags
+                    -- Try to do work before taking the lock.
+                    Exception.evaluate $ DeepSeq.rnf warnings
+                    MVar.withMVar stderr $ \hdl ->
+                        mapM_ (IO.hPutStrLn hdl) warnings
+                    when verbose $ do
+                        let line = take 78 $ show i ++ ": " ++ show fn
+                        putStr $ '\r' : line ++ replicate (78 - length line) ' '
+                        IO.hFlush IO.stdout
+                    return (fn, newTags)
 
     when verbose $ putChar '\n'
 
@@ -214,3 +228,38 @@ getInputs flags inputs
     | otherwise            = pure inputs
     where
     sep = if ZeroSep `elem` flags then '\0' else '\n'
+
+parMapNondet :: forall r a b. [r] -> [a] -> (r -> a -> IO b) -> IO [b]
+parMapNondet rs as f = do
+    resources      <- newTChanIO
+    tasks          <- newTMChanIO
+    results        <- newTVarIO []
+    tid            <- myThreadId
+    bracket
+        (for rs' $ \_ -> Async.async $ process tid resources tasks results)
+        Async.cancelMany
+        $ \handles -> do
+            traverse_ (atomically . writeTChan resources) rs
+            for_ as $ \a -> atomically $ do
+                r <- readTChan resources
+                writeTMChan tasks (r, a)
+            atomically $ closeTMChan tasks
+            traverse_ Async.wait handles
+            atomically $ readTVar results
+    where
+        rs' :: [(Int, r)]
+        rs' = zip [0..] rs
+        process :: ThreadId -> TChan r -> TMChan (r, a) -> TVar [b] -> IO ()
+        process master resources tasks results = go
+            where
+                go = do
+                    res <- atomically $ readTMChan tasks
+                    case res of
+                        Nothing     -> pure ()
+                        Just (r, a) -> do
+                            !b <- (f r a `finally` atomically (writeTChan resources r)) `Exception.catch`
+                                \(e :: SomeException) -> do
+                                    Exception.throwTo master e
+                                    Exception.throwIO e
+                            atomically $ modifyTVar results $ (b :)
+                            go
