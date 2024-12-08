@@ -230,6 +230,7 @@ getInputs flags inputs
     sep = if ZeroSep `elem` flags then '\0' else '\n'
 
 parMapNondet :: forall r a b. [r] -> [a] -> (r -> a -> IO b) -> IO [b]
+parMapNondet [r] as f = traverse (f r) as
 parMapNondet rs as f = do
     resources      <- newTChanIO
     tasks          <- newTMChanIO
