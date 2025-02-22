@@ -48,6 +48,8 @@ writeTo dest xs = do
                 list $ do
                     int $ Token.unLine posLine
                     txt tvName
+                    bool True -- unconditionally public
+                    rawchar ' '
                     case tvParent of
                         Nothing                                    -> do
                             rawchar '.'
@@ -90,6 +92,9 @@ writeTo dest xs = do
 
         int :: Int -> IO ()
         int = T.hPutStr dest . TL.toStrict . TLB.toLazyText . TLBI.decimal
+
+        bool :: Bool -> IO ()
+        bool x = T.hPutStr dest $ if x then "t" else "nil"
 
 foldBSM :: (Monoid a, MonadIO m) => (Char -> m a) -> ByteString -> m a
 foldBSM f (BSI.BS ptr len) = do
